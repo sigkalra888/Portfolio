@@ -1,0 +1,403 @@
+<!DOCTYPE html>
+<html lang="ja">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="X-UA-Compatible" content="ie=edge">
+    <title>Document</title>
+    <link rel="stylesheet" type="text/css" href="./common.css" />
+</head>
+
+<body>
+    <h1>ポートフォリオ</h1>
+    <h3>自己紹介</h3>
+    <table>
+        <tr>
+            <th>名前</th>
+            <td><ruby>後藤清治<rt>ごとうきよはる</rt></ruby></td>
+        </tr>
+        <tr>
+            <th>出身校</th>
+            <td><ruby>東京デザインテクノロジーセンター専門学校<rt>Tech'C</rt></ruby></td>
+        </tr>
+        <tr>
+            <th>趣味</th>
+            <td>映画鑑賞、小説・漫画</td>
+        </tr>
+    </table>
+    <h3>成果物</h3>
+    <table>
+        <tr>
+            <th>タイトル</th>
+            <td>３目並べ（個人製作）</td>
+        </tr>
+        <tr>
+            <th>プログラム概要</th>
+            <td>３目並べ（〇×）を３Ｄで作成。リッチなゲーム感を出す。</td>
+        </tr>
+        <tr>
+            <th>制作期間</th>
+            <td>2019/05/25 ~ 2019/06/01 ６時間程度</td>
+        </tr>
+        <tr>
+            <th>使用言語・ソフト</th>
+            <td>Unity を使用し、Visual Studio Code を使い windows 上で記述・デバッグ。</td>
+        </tr>
+    </table>
+    <h4>ソースコード</h4>
+
+    <div onclick="obj=document.getElementById('menu1').style; obj.display=(obj.display=='none')?'block':'none';">
+        <a style="cursor:pointer;">▼ GameControl.csソースコード</a>
+    </div>
+
+    <div id="menu1" style="display:none;clear:both;">
+        <div class="rollbox">
+        <pre>
+                <code>
+    using System.Collections;
+    using System.Collections.Generic;
+    using System.Linq;
+    using UnityEngine;
+    using UnityEngine.UI;
+    using UniRx;
+    
+    public class GameControl : MonoBehaviour
+    {
+        #region データフィールド
+    
+        enum WinnerType
+        {
+            Player1 = 0,
+            Player2,
+            Draw,
+            None
+        }
+    
+        //  パネルリスト
+        [SerializeField]
+        private List<PanlesView> panels = new List<PanlesView>();
+    
+        [SerializeField]
+        private Text clearText;
+        [SerializeField]
+        private Text pushText;
+    
+        //  入力スクリプト
+        private InputControl inputControl;
+    
+        //  ターン（true:プレイヤー１、false:プレイヤー２）
+        private bool isTokenTurn = true;
+    
+        //  勝利タイプ
+        private WinnerType winnerType = WinnerType.None;
+    
+        //  リセット待ちフラグ
+        private bool isReset = false;
+    
+        //  クリアチェックテーブル（この並びで同じマークになったら勝利）
+        private List<List<int>> CheckTableList = new List<List<int>>()
+        {
+            new List<int>(){0,1,2},
+            new List<int>(){3,4,5},
+            new List<int>(){6,7,8},
+            new List<int>(){0,3,6},
+            new List<int>(){1,4,7},
+            new List<int>(){2,5,8},
+            new List<int>(){0,4,8},
+            new List<int>(){2,4,6},
+        };
+    
+        // クリア用のメッセージ
+        string[] clearMsg =
+        {
+            "Player 1 Win!",
+            "Player 2 Win!",
+            "Draw !!!"
+        };
+    
+    
+        #endregion
+    
+    
+        #region 関数フィールド
+    
+        // Start is called before the first frame update
+        void Start()
+        {
+            //  入力コントローラの取得
+            inputControl = GetComponent<InputControl>();
+    
+            //  パネルに初期値を設定
+            Enumerable.Range(0, 9).ToList().ForEach(num => panels[num].Init(num));
+    
+            //  入力処理
+            Observable.EveryUpdate().Select(_ => inputControl.SelectPanelNumber)
+                .Where(pnum => pnum >= 0 && winnerType == WinnerType.None)
+                .Subscribe(pnum => CheckClearOrEnd(pnum)).AddTo(this);
+    
+            //  ゲーム終了時の処理
+            Observable.EveryUpdate().Where(_ => winnerType != WinnerType.None && !isReset)
+                .Subscribe(_ => DispClearText()).AddTo(this);
+    
+        }
+    
+        /// <summary>
+        /// ゲームのリセット処理
+        /// </summary>
+        private void ResetGame()
+        {
+            //  フラグの初期化
+            isReset = false;
+            isTokenTurn = true;
+            winnerType = WinnerType.None;
+            //  テキスト表示関連の非表示
+            clearText.gameObject.SetActive(false);
+            pushText.gameObject.SetActive(false);
+            //  パネル選択画像のクリア
+            panels.ForEach(x => x.ClearImage());
+        }
+    
+        /// <summary>
+        /// ゲームクリアテキストを表示
+        /// </summary>
+        private void DispClearText()
+        {
+            //  クリアメッセージテキストの表示
+            clearText.gameObject.SetActive(true);
+            pushText.gameObject.SetActive(true);
+            clearText.text = clearMsg[(int)winnerType];
+            isReset = true;
+            //  ゲームのリセット待ち
+            Observable.EveryUpdate().Where(_ => isReset && Input.GetMouseButtonDown(0))
+                .First()
+                .Subscribe(_ => ResetGame()).AddTo(this);
+        }
+    
+        /// <summary>
+        /// ゲーム終了あるいはクリアチェック
+        /// </summary>
+        private void CheckClearOrEnd(int selPanelNum)
+        {
+            //  配列を超える数が入ってきたらエラーなので何も処理しない
+            if (selPanelNum >= panels.Count)
+                return;
+            //  ターンによって表示するマテリアルを入れ替える
+            if (isTokenTurn)
+                panels[selPanelNum].SetImge(PanlesView.PutImageType.Maru);
+            else
+                panels[selPanelNum].SetImge(PanlesView.PutImageType.Batu);
+    
+            //  ターンの入れ替え
+            isTokenTurn = !isTokenTurn;
+    
+            //  クリアパターンを順番にチェック
+            CheckTableList.ForEach(x =>
+            {
+                //  pleyer1 win
+                if (x.All(num => panels[num].PImgeType == PanlesView.PutImageType.Maru))
+                    winnerType = WinnerType.Player1;
+                //  plyer2 win
+                else if (x.All(num => panels[num].PImgeType == PanlesView.PutImageType.Batu))
+                    winnerType = WinnerType.Player2;
+            });
+            //  勝利フラグが成立していれば処理を抜ける
+            if (winnerType != WinnerType.None)
+                return;
+            //  すべてが埋まっていてどちらも勝利していなければ終了
+            if(panels.All(x => x.PImgeType != PanlesView.PutImageType.None))
+                winnerType = WinnerType.Draw;
+        }
+    
+        #endregion
+    }
+                </code>
+            </pre>
+        </div>
+    </div>
+
+
+    <div onclick="obj=document.getElementById('menu2').style; obj.display=(obj.display=='none')?'block':'none';">
+        <a style="cursor:pointer;">▼ InputControl.csソースコード</a>
+    </div>
+    <div id="menu2" style="display:none;clear:both;">
+            <div class="rollbox">
+
+        <pre>
+    <code>
+            using System.Collections;
+            using System.Collections.Generic;
+            using UnityEngine;
+            using UniRx;
+            
+            public class InputControl : MonoBehaviour
+            {
+                //  現在選択中のパネル番号を設定（選択ナシは-1でデフォルトとする）
+                private int selectPanelNumber = -1;
+                //  データを取得しに来たら選択中のパネル番号をクリアしておく
+                public int SelectPanelNumber {
+                    get {
+                        var num = selectPanelNumber;
+                        selectPanelNumber = -1;
+                        return num;
+                    }
+                }
+            
+                // Start is called before the first frame update
+                void Start()
+                {
+                    Observable.EveryUpdate().Where(_ => Input.GetMouseButtonDown(0))
+                        .Subscribe(_ =>
+                        {
+                            Ray ray = Camera.main.ScreenPointToRay(Input.mousePosition);
+                            RaycastHit hit = new RaycastHit();
+            
+                            if (Physics.Raycast(ray, out hit))
+                            {
+                                var gObj = hit.collider.gameObject;
+                                if (gObj.name.Equals("Token"))
+                                {
+                                    var parent = gObj.GetComponentInParent<PanlesView>();
+                                    selectPanelNumber = parent.PanelNumber;
+                                }
+                            }
+                        })
+                        .AddTo(this);
+                }
+            }
+            
+    </code>
+    </pre>
+    </div>
+    </div>
+
+    <div onclick="obj=document.getElementById('menu3').style; obj.display=(obj.display=='none')?'block':'none';">
+        <a style="cursor:pointer;">▼ BlinkTextView.csソースコード</a>
+    </div>
+    <div id="menu3" style="display:none;clear:both;">
+            <div class="rollbox">
+                    <pre>
+    <code>
+    using System.Collections;
+    using System.Collections.Generic;
+    using UnityEngine;
+    
+    public class BlinkTextView : MonoBehaviour
+    {
+        //  点滅時間
+        [SerializeField]
+        private float blinkTime = 1;
+    
+        //  表示状態
+        private bool isDisp = true;
+    
+        //  点滅管理用タイマー
+        private float timer = 0;
+    
+        // Update is called once per frame
+        void Update()
+        {
+            //  タイマーを加算
+            timer += Time.deltaTime;
+            //  タイマーが点滅時間に達したら表示を変更する
+            if(timer > blinkTime)
+            {
+                //  タイマーをクリア
+                timer = 0;
+                //  現在表示中なら非表示にする（αを０に）
+                if (isDisp)
+                    GetComponent<CanvasGroup>().alpha = 0;
+                //  現在非表示中なら表示にする（αを１に）
+                else
+                    GetComponent<CanvasGroup>().alpha = 1;
+                //  状態フラグを反転させる
+                isDisp = !isDisp;
+            }
+        }
+    }
+    </code>
+    </pre>
+    </div>
+    </div>
+
+    <div onclick="obj=document.getElementById('menu4').style; obj.display=(obj.display=='none')?'block':'none';">
+        <a style="cursor:pointer;">▼ PanelsView.csソースコード</a>
+    </div>
+    <div id="menu4" style="display:none;clear:both;">
+            <div class="rollbox">
+        <pre>
+    <code>
+    using System.Collections;
+    using System.Collections.Generic;
+    using UnityEngine;
+    
+    public class PanlesView : MonoBehaviour
+    {
+        //  パネルの番号を保持
+        private int panelNumber = 0;
+        //  パネルの番号を取得
+        public int PanelNumber { get { return panelNumber; } }
+    
+        //  マテリアルタイプ
+        public enum PutImageType
+        {
+            None = 0,
+            Maru,
+            Batu
+        }
+    
+        //  〇、×、何も表示しないの3種類のマテリアルを登録する
+        [SerializeField]
+        private List<Material> imageMaterials = new List<Material>();
+    
+        //  〇、×を表示するオブジェクトのメッシュレンダラー
+        [SerializeField]
+        private MeshRenderer childPanel;
+    
+        //  何も表示しない状態をデフォルトにする
+        private PutImageType putImageType = PutImageType.None;
+        public PutImageType PImgeType { get { return putImageType; } }
+    
+        //  パネルの番号を登録する
+        public void Init(int num)
+        {
+            panelNumber = num;
+        }
+    
+        /// <summary>
+        /// パネルに表示するイメージタイプを設定
+        /// </summary>
+        /// <param name="imageType">表示イメージタイプ</param>
+        public void SetImge(PutImageType imageType)
+        {
+            //  すでに設定したところには再設定できない
+            if (putImageType != PutImageType.None)
+                return;
+            putImageType = imageType;
+            //  メッシュレンダラーのマテリアルに選択したマテリアルを張り付ける
+            childPanel.material = imageMaterials[(int)putImageType];
+        }
+    
+        /// <summary>
+        /// パネルの画像をクリアする
+        /// </summary>
+        public void ClearImage()
+        {
+            putImageType = PutImageType.None;
+            //  メッシュレンダラーのマテリアルに選択したマテリアルを張り付ける
+            childPanel.material = imageMaterials[(int)putImageType];
+        }
+    }
+    </code>
+    </pre>
+    </div>
+    </div>
+
+
+    <h3>自分のスキルについて</h3>
+    <h4></h4>
+
+
+</body>
+
+</html>
